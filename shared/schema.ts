@@ -1,8 +1,8 @@
-import { pgTable, text, serial, integer, boolean, numeric, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, numeric, timestamp, foreignKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Basic user schema (from original file)
+// Basic user schema
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
@@ -46,11 +46,13 @@ export const insertSportSchema = createInsertSchema(sports).pick({
 export const events = pgTable("events", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  sportId: integer("sport_id").notNull(),
+  sportId: integer("sport_id").notNull().references(() => sports.id),
   startTime: timestamp("start_time").notNull(),
   competition: text("competition"),
   status: text("status").default("upcoming"),
 });
+
+
 
 export const insertEventSchema = createInsertSchema(events).pick({
   name: true,
@@ -63,10 +65,10 @@ export const insertEventSchema = createInsertSchema(events).pick({
 // Betting opportunities
 export const opportunities = pgTable("opportunities", {
   id: serial("id").primaryKey(),
-  eventId: integer("event_id").notNull(),
+  eventId: integer("event_id").notNull().references(() => events.id),
   market: text("market").notNull(),
-  bookmaker1Id: integer("bookmaker1_id").notNull(),
-  bookmaker2Id: integer("bookmaker2_id").notNull(),
+  bookmaker1Id: integer("bookmaker1_id").notNull().references(() => bookmakers.id),
+  bookmaker2Id: integer("bookmaker2_id").notNull().references(() => bookmakers.id),
   odds1: numeric("odds1").notNull(),
   odds2: numeric("odds2").notNull(),
   profitPercent: numeric("profit_percent").notNull(),
@@ -74,6 +76,8 @@ export const opportunities = pgTable("opportunities", {
   createdAt: timestamp("created_at").defaultNow(),
   isActive: boolean("is_active").default(true),
 });
+
+
 
 export const insertOpportunitySchema = createInsertSchema(opportunities).pick({
   eventId: true,
@@ -92,9 +96,11 @@ export const activityLogs = pgTable("activity_logs", {
   id: serial("id").primaryKey(),
   type: text("type").notNull(), // new_opportunity, odds_change, opportunity_expired, system_update
   message: text("message").notNull(),
-  relatedOpportunityId: integer("related_opportunity_id"),
+  relatedOpportunityId: integer("related_opportunity_id").references(() => opportunities.id),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+
 
 export const insertActivityLogSchema = createInsertSchema(activityLogs).pick({
   type: true,

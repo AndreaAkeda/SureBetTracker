@@ -4,8 +4,9 @@ import ProfitCalculator from "@/components/dashboard/profit-calculator";
 import SportsDistribution from "@/components/dashboard/sports-distribution";
 import RecentActivity from "@/components/dashboard/recent-activity";
 import UpcomingEvents from "@/components/dashboard/upcoming-events";
+import { RouteComponentProps } from "wouter";
 
-interface DashboardProps {
+interface DashboardProps extends Partial<RouteComponentProps> {
   selectedSport?: number | null;
   selectedBookmakers?: number[];
   minProfit?: number;

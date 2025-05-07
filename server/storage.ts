@@ -207,55 +207,92 @@ export class DatabaseStorage implements IStorage {
     highestProfitPercent: number;
     highestProfitOpportunityId?: number;
   }> {
-    // Get active opportunities count
-    const [{ value: activeCount }] = await db.select({
-      value: count(opportunities.id)
-    })
-    .from(opportunities)
-    .where(eq(opportunities.isActive, true));
-    
-    // Get average profit percent
-    const [avgProfit] = await db.select({
-      value: avg(opportunities.profitPercent)
-    })
-    .from(opportunities)
-    .where(eq(opportunities.isActive, true));
-    
-    // Get highest profit opportunity
-    const [highestProfit] = await db.select({
-      id: opportunities.id,
-      profit: max(opportunities.profitPercent)
-    })
-    .from(opportunities)
-    .where(eq(opportunities.isActive, true));
-    
-    return {
-      activeOpportunitiesCount: Number(activeCount) || 0,
-      averageProfitPercent: Number(avgProfit?.value) || 0,
-      highestProfitPercent: Number(highestProfit?.profit) || 0,
-      highestProfitOpportunityId: highestProfit?.id
-    };
+    try {
+      // Get active opportunities count
+      const activeCountResult = await db.select({
+        count: count(),
+      })
+      .from(opportunities)
+      .where(eq(opportunities.isActive, true));
+      
+      const activeCount = activeCountResult[0]?.count || 0;
+      
+      // Get average profit percent
+      const avgProfitResult = await db.select({
+        avg: sql<number>`avg(${opportunities.profitPercent})`,
+      })
+      .from(opportunities)
+      .where(eq(opportunities.isActive, true));
+      
+      const avgProfit = avgProfitResult[0]?.avg || 0;
+      
+      // Get highest profit opportunity
+      const highestProfitResult = await db
+        .select({
+          id: opportunities.id,
+          profit: opportunities.profitPercent,
+        })
+        .from(opportunities)
+        .where(eq(opportunities.isActive, true))
+        .orderBy(desc(opportunities.profitPercent))
+        .limit(1);
+      
+      const highestProfit = highestProfitResult[0]?.profit || 0;
+      const highestProfitId = highestProfitResult[0]?.id;
+      
+      return {
+        activeOpportunitiesCount: Number(activeCount),
+        averageProfitPercent: Number(avgProfit),
+        highestProfitPercent: Number(highestProfit),
+        highestProfitOpportunityId: highestProfitId
+      };
+    } catch (error) {
+      console.error("Error in getDashboardStats:", error);
+      return {
+        activeOpportunitiesCount: 0,
+        averageProfitPercent: 0,
+        highestProfitPercent: 0
+      };
+    }
   }
   
   // Sports distribution
   async getSportsDistribution(): Promise<{ sportId: number, sportName: string, count: number }[]> {
-    // Complex query to get the distribution of active opportunities by sport
-    const result = await db.select({
-      sportId: sports.id,
-      sportName: sports.name,
-      count: count(opportunities.id)
-    })
-    .from(sports)
-    .leftJoin(events, eq(events.sportId, sports.id))
-    .leftJoin(opportunities, eq(opportunities.eventId, events.id))
-    .where(eq(opportunities.isActive, true))
-    .groupBy(sports.id, sports.name);
-    
-    return result.map(item => ({
-      sportId: item.sportId,
-      sportName: item.sportName,
-      count: Number(item.count) || 0
-    }));
+    try {
+      // Get all sports first
+      const allSports = await db.select({
+        id: sports.id,
+        name: sports.name
+      }).from(sports);
+      
+      // Then get the counts of active opportunities by sport
+      const opportunityCounts = await db
+        .select({
+          sportId: sports.id,
+          count: count(opportunities.id)
+        })
+        .from(opportunities)
+        .innerJoin(events, eq(opportunities.eventId, events.id))
+        .innerJoin(sports, eq(events.sportId, sports.id))
+        .where(eq(opportunities.isActive, true))
+        .groupBy(sports.id);
+      
+      // Map sports to their opportunity counts
+      const countMap = new Map();
+      opportunityCounts.forEach(item => {
+        countMap.set(item.sportId, Number(item.count));
+      });
+      
+      // Combine the data
+      return allSports.map(sport => ({
+        sportId: sport.id,
+        sportName: sport.name,
+        count: countMap.get(sport.id) || 0
+      }));
+    } catch (error) {
+      console.error("Error in getSportsDistribution:", error);
+      return [];
+    }
   }
 
   // Seed the database with initial data
@@ -269,23 +306,28 @@ export class DatabaseStorage implements IStorage {
       return; // Database already has data, no need to seed
     }
 
-    // Seed bookmakers
+    // Seed Brazilian bookmakers
     const bookmakerData: InsertBookmaker[] = [
       { name: "Bet365", logo: "bet365-logo", active: true },
-      { name: "Betway", logo: "betway-logo", active: true },
-      { name: "888sport", logo: "888sport-logo", active: true },
-      { name: "Unibet", logo: "unibet-logo", active: true },
-      { name: "William Hill", logo: "williamhill-logo", active: true }
+      { name: "Betano", logo: "betano-logo", active: true },
+      { name: "KTO", logo: "kto-logo", active: true },
+      { name: "Sportingbet", logo: "sportingbet-logo", active: true },
+      { name: "Superbet", logo: "superbet-logo", active: true },
+      { name: "Galera.bet", logo: "galerabet-logo", active: true },
+      { name: "Betsson", logo: "betsson-logo", active: true },
+      { name: "Parimatch", logo: "parimatch-logo", active: true }
     ];
     
     await db.insert(bookmakers).values(bookmakerData);
     
-    // Seed sports
+    // Seed sports popular in Brazil
     const sportsData: InsertSport[] = [
-      { name: "Football", icon: "football-icon", active: true },
-      { name: "Tennis", icon: "tennis-icon", active: true },
-      { name: "Basketball", icon: "basketball-icon", active: true },
-      { name: "Hockey", icon: "hockey-icon", active: true }
+      { name: "Futebol", icon: "football-icon", active: true },
+      { name: "Basquete", icon: "basketball-icon", active: true },
+      { name: "Vôlei", icon: "volleyball-icon", active: true },
+      { name: "Tênis", icon: "tennis-icon", active: true },
+      { name: "MMA", icon: "mma-icon", active: true },
+      { name: "Formula 1", icon: "f1-icon", active: true }
     ];
     
     await db.insert(sports).values(sportsData);
@@ -305,45 +347,66 @@ export class DatabaseStorage implements IStorage {
     
     const eventsData: InsertEvent[] = [
       { 
-        name: "Barcelona vs Real Madrid", 
+        name: "Flamengo vs Palmeiras", 
         sportId: 1, 
         startTime: tomorrow,
-        competition: "La Liga",
+        competition: "Brasileirão Série A",
         status: "upcoming"
       },
       { 
-        name: "Djokovic vs Nadal", 
+        name: "Corinthians vs São Paulo", 
+        sportId: 1, 
+        startTime: dayAfterTomorrow,
+        competition: "Brasileirão Série A",
+        status: "upcoming"
+      },
+      { 
+        name: "Santos vs Fluminense", 
+        sportId: 1, 
+        startTime: tomorrow,
+        competition: "Brasileirão Série A",
+        status: "upcoming"
+      },
+      { 
+        name: "Flamengo Basquete vs Franca", 
         sportId: 2, 
         startTime: dayAfterTomorrow,
-        competition: "ATP Masters",
+        competition: "NBB",
         status: "upcoming"
       },
       { 
-        name: "Lakers vs Warriors", 
+        name: "Sesi Franca vs Minas", 
+        sportId: 2, 
+        startTime: tomorrow,
+        competition: "NBB",
+        status: "upcoming"
+      },
+      { 
+        name: "Sada Cruzeiro vs Minas", 
         sportId: 3, 
-        startTime: threeDaysLater,
-        competition: "NBA",
+        startTime: tomorrow,
+        competition: "Superliga",
         status: "upcoming"
       },
       { 
-        name: "Bruins vs Canadiens", 
+        name: "Alcaraz vs Sinner", 
         sportId: 4, 
         startTime: dayAfterTomorrow,
-        competition: "NHL",
+        competition: "Rio Open",
         status: "upcoming"
       },
       { 
-        name: "Manchester United vs Liverpool", 
-        sportId: 1, 
-        startTime: fourDaysLater,
-        competition: "Premier League",
-        status: "upcoming"
-      },
-      { 
-        name: "Murray vs Federer", 
-        sportId: 2, 
+        name: "Poatan vs Adesanya", 
+        sportId: 5, 
         startTime: threeDaysLater,
-        competition: "Wimbledon",
+        competition: "UFC",
+        status: "upcoming"
+      },
+      { 
+        name: "GP Brasil - Interlagos", 
+        sportId: 6, 
+        startTime: threeDaysLater,
+        competition: "Formula 1",
         status: "upcoming"
       }
     ];
@@ -352,13 +415,13 @@ export class DatabaseStorage implements IStorage {
       id: events.id
     });
     
-    // Seed opportunities
+    // Seed opportunities with Brazilian markets and bookmakers
     const opportunitiesData: InsertOpportunity[] = [
       {
         eventId: insertedEvents[0].id,
-        market: "Match Result",
-        bookmaker1Id: 1,
-        bookmaker2Id: 2,
+        market: "Resultado da Partida",
+        bookmaker1Id: 1, // Bet365
+        bookmaker2Id: 2, // Betano
         odds1: "2.25",
         odds2: "2.35",
         profitPercent: "3.8",
@@ -367,9 +430,9 @@ export class DatabaseStorage implements IStorage {
       },
       {
         eventId: insertedEvents[1].id,
-        market: "Match Winner",
-        bookmaker1Id: 3,
-        bookmaker2Id: 4,
+        market: "Ambas Equipes Marcam",
+        bookmaker1Id: 3, // KTO
+        bookmaker2Id: 4, // Sportingbet
         odds1: "1.85",
         odds2: "2.10",
         profitPercent: "2.5",
@@ -378,9 +441,9 @@ export class DatabaseStorage implements IStorage {
       },
       {
         eventId: insertedEvents[2].id,
-        market: "Match Winner",
-        bookmaker1Id: 2,
-        bookmaker2Id: 5,
+        market: "Mais/Menos 2.5 Gols",
+        bookmaker1Id: 2, // Betano
+        bookmaker2Id: 5, // Superbet
         odds1: "1.95",
         odds2: "2.05",
         profitPercent: "1.8",
@@ -389,13 +452,57 @@ export class DatabaseStorage implements IStorage {
       },
       {
         eventId: insertedEvents[3].id,
-        market: "Match Winner",
-        bookmaker1Id: 1,
-        bookmaker2Id: 3,
+        market: "Vencedor",
+        bookmaker1Id: 6, // Galera.bet
+        bookmaker2Id: 7, // Betsson
         odds1: "1.75",
         odds2: "2.25",
         profitPercent: "2.2",
         recommendedInvestment: "150",
+        isActive: true
+      },
+      {
+        eventId: insertedEvents[4].id,
+        market: "Handicap Asiático",
+        bookmaker1Id: 1, // Bet365
+        bookmaker2Id: 7, // Betsson
+        odds1: "1.95",
+        odds2: "2.01",
+        profitPercent: "1.5",
+        recommendedInvestment: "250",
+        isActive: true
+      },
+      {
+        eventId: insertedEvents[5].id,
+        market: "Total de Sets",
+        bookmaker1Id: 2, // Betano
+        bookmaker2Id: 8, // Parimatch
+        odds1: "2.40",
+        odds2: "2.50",
+        profitPercent: "4.1",
+        recommendedInvestment: "120",
+        isActive: true
+      },
+      {
+        eventId: insertedEvents[6].id,
+        market: "Vencedor do Primeiro Set",
+        bookmaker1Id: 4, // Sportingbet
+        bookmaker2Id: 5, // Superbet
+        odds1: "1.60",
+        odds2: "1.70",
+        profitPercent: "2.0",
+        recommendedInvestment: "180",
+        isActive: true
+      },
+      {
+        eventId: insertedEvents[7].id,
+        market: "Vencedor por Nocaute",
+        bookmaker1Id: 3, // KTO
+        bookmaker2Id: 6, // Galera.bet
+        odds1: "3.25",
+        odds2: "3.40",
+        profitPercent: "4.5",
+        recommendedInvestment: "90",
         isActive: true
       }
     ];
@@ -408,23 +515,33 @@ export class DatabaseStorage implements IStorage {
     const activityLogsData: InsertActivityLog[] = [
       {
         type: "new_opportunity",
-        message: "New opportunity found: Barcelona vs Real Madrid",
+        message: "Nova oportunidade encontrada: Flamengo vs Palmeiras",
         relatedOpportunityId: insertedOpportunities[0].id
       },
       {
         type: "new_opportunity",
-        message: "New opportunity found: Djokovic vs Nadal",
+        message: "Nova oportunidade encontrada: Corinthians vs São Paulo",
         relatedOpportunityId: insertedOpportunities[1].id
       },
       {
         type: "odds_change",
-        message: "Odds for Barcelona vs Real Madrid changed from 2.20 to 2.25",
+        message: "Odds para Flamengo vs Palmeiras alteradas de 2.20 para 2.25",
         relatedOpportunityId: insertedOpportunities[0].id
       },
       {
         type: "system_update",
-        message: "System updated with 3 new bookmakers",
+        message: "Sistema atualizado com bookmakers brasileiras",
         relatedOpportunityId: null
+      },
+      {
+        type: "new_opportunity",
+        message: "Nova oportunidade encontrada: Santos vs Fluminense",
+        relatedOpportunityId: insertedOpportunities[2].id
+      },
+      {
+        type: "new_opportunity",
+        message: "Nova oportunidade encontrada: Flamengo Basquete vs Franca",
+        relatedOpportunityId: insertedOpportunities[3].id
       }
     ];
     
